@@ -17,7 +17,11 @@ const flashcardSchema = new mongoose.Schema(
       ref: "Deck",
       required: true,
     },
-
+    difficulty: {
+      type: String,
+      enum: ["easy", "medium", "hard"],
+      default: "medium",
+    },
     studyStats: {
       lastStudied: {
         type: Date,
