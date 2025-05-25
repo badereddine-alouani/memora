@@ -65,7 +65,7 @@ export async function POST(req: NextRequest) {
     await existingUser.save();
 
     return NextResponse.json(
-      { message: "Deck created successfully", deckId: newDeck._id },
+      { message: "Deck created successfully", newDeck },
       { status: 201 }
     );
   } catch (error) {

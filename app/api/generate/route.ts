@@ -22,14 +22,18 @@ export async function POST(req: NextRequest) {
         },
         {
           role: "user",
-          content: `Generate as many flashcards as needed (with 'front' and 'back' fields) based on the following text: ${text}`,
+          content: `Generate as many flashcards as needed (with 'front' and 'back' fields) in the target language based on the following text: ${text}`,
         },
       ],
     });
 
     let raw = completion.choices[0].message.content?.trim() || "";
-    raw = raw.replace(/^```json\s*/, "").replace(/\s*```$/, "");
+    raw = raw
+      .replace(/^[^\[]*?(\[)/s, "$1")
+      .replace(/```[\s\S]*?$/, "")
+      .trim();
 
+    console.log(raw);
     const parsed = JSON.parse(raw);
 
     const limitedFlashcards = parsed.slice(0, maxCount);

@@ -1,6 +1,6 @@
 {
   "compilerOptions": {
-    "target": "ES2017",
+    "target": "ES2018",
     "lib": ["dom", "dom.iterable", "esnext"],
     "allowJs": true,
     "skipLibCheck": true,
@@ -27,7 +27,9 @@
     "**/*.ts",
     "**/*.tsx",
     ".next/types/**/*.ts",
-    "lib/db.js"
+    "lib/db.js",
+    "app/api/auth/[...nextauth]/route.js",
+    "app/api/auth/[...nextauth]/route.js"
   ],
   "exclude": ["node_modules"]
 }
