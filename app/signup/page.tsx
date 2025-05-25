@@ -35,10 +35,36 @@ export default function SignupPage() {
     }));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Handle signup logic here
-    console.log("Signup attempt:", formData);
+
+    try {
+      const response = await fetch("/api/auth/register", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          username: formData.username,
+          email: formData.email,
+          password: formData.password,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        // Show an error message (can use toast or a state variable)
+        alert(data.message || "Something went wrong");
+        return;
+      }
+
+      // Redirect to sign-in or dashboard on success
+      window.location.href = "/signin";
+    } catch (error) {
+      console.error("Signup error:", error);
+      alert("An unexpected error occurred. Please try again later.");
+    }
   };
 
   const passwordRequirements = [

@@ -19,6 +19,11 @@ export async function GET(
       );
     }
 
+    const deck = await Deck.findById(deckId);
+    if (!deck) {
+      return NextResponse.json({ message: "Deck not found" }, { status: 404 });
+    }
+
     const flashcards = await Flashcard.find({ deckId });
 
     return NextResponse.json(flashcards, { status: 200 });
@@ -36,31 +41,14 @@ export async function POST(
     await connectDB();
 
     const { deckId } = await params;
-    if (!deckId) {
+
+    const { front, back, difficulty } = await req.json();
+
+    if (!deckId || !front || !back) {
       return NextResponse.json(
-        { message: "deckId parameter is required" },
+        { message: "deckId, front and back fields are required" },
         { status: 400 }
       );
-    }
-
-    const userId = "681b8b163473568616340e2b";
-
-    const flashcardsData = await req.json();
-
-    if (!Array.isArray(flashcardsData) || flashcardsData.length === 0) {
-      return NextResponse.json(
-        { message: "Request body must be a non-empty array of flashcards" },
-        { status: 400 }
-      );
-    }
-
-    for (const card of flashcardsData) {
-      if (!card.front || !card.back) {
-        return NextResponse.json(
-          { message: "Each flashcard must have front and back fields" },
-          { status: 400 }
-        );
-      }
     }
 
     const deck = await Deck.findById(deckId);
@@ -68,32 +56,21 @@ export async function POST(
       return NextResponse.json({ message: "Deck not found" }, { status: 404 });
     }
 
-    if (deck.userId.toString() !== userId) {
-      return NextResponse.json({ message: "Unauthorized" }, { status: 403 });
-    }
+    const newFlashcard = new Flashcard({ deckId, front, back, difficulty });
+    await newFlashcard.save();
 
-    const createdFlashcards = await Flashcard.insertMany(
-      flashcardsData.map(({ front, back }) => ({
-        front,
-        back,
-        deckId,
-      }))
-    );
-
-    const flashcardIds = createdFlashcards.map((fc) => fc._id);
-    deck.flashcards.push(...flashcardIds);
-
+    deck.flashcards.push(newFlashcard._id);
     await deck.save();
 
     return NextResponse.json(
       {
-        message: "Flashcards created and added to deck",
-        addedCount: flashcardIds.length,
+        message: "Flashcard created successfully",
+        newFlashcard,
       },
       { status: 201 }
     );
   } catch (error) {
-    console.error("Error adding flashcards:", error);
+    console.error("Error creating flashcard:", error);
     return NextResponse.json({ message: "Server error" }, { status: 500 });
   }
 }

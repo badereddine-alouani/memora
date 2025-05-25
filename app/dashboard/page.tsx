@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -45,6 +45,8 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { useRouter } from "next/navigation";
+import { signOut, useSession } from "next-auth/react";
 
 interface Deck {
   id: string;
@@ -56,49 +58,12 @@ interface Deck {
 }
 
 export default function DashboardPage() {
-  // Mock data - replace with actual API calls
-  const [decks, setDecks] = useState<Deck[]>([
-    {
-      id: "1",
-      name: "Spanish Vocabulary",
-      description: "Essential Spanish words and phrases for beginners",
-      flashcardCount: 45,
-      lastModified: "2024-01-15",
-      createdAt: "2024-01-10",
-    },
-    {
-      id: "2",
-      name: "Biology Chapter 5",
-      description: "Cell structure and organelles study material",
-      flashcardCount: 32,
-      lastModified: "2024-01-14",
-      createdAt: "2024-01-12",
-    },
-    {
-      id: "3",
-      name: "JavaScript Fundamentals",
-      description: "Core JavaScript concepts and syntax",
-      flashcardCount: 67,
-      lastModified: "2024-01-13",
-      createdAt: "2024-01-08",
-    },
-    {
-      id: "4",
-      name: "World History",
-      description: "Important dates and events in world history",
-      flashcardCount: 89,
-      lastModified: "2024-01-12",
-      createdAt: "2024-01-05",
-    },
-    {
-      id: "5",
-      name: "Chemistry Formulas",
-      description: "Chemical equations and molecular structures",
-      flashcardCount: 23,
-      lastModified: "2024-01-11",
-      createdAt: "2024-01-09",
-    },
-  ]);
+  const { data: session, status } = useSession();
+  const userId = (session?.user as any)?.id;
+  const username = (session?.user as any)?.username;
+
+  const router = useRouter();
+  const [decks, setDecks] = useState<Deck[]>([]);
 
   const [searchTerm, setSearchTerm] = useState("");
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -113,46 +78,115 @@ export default function DashboardPage() {
     deck.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const handleCreateDeck = () => {
+  const handleCreateDeck = async () => {
     if (newDeck.name.trim()) {
-      const deck: Deck = {
-        id: Date.now().toString(),
-        name: newDeck.name,
-        description: newDeck.description,
-        flashcardCount: 0,
-        lastModified: new Date().toISOString().split("T")[0],
-        createdAt: new Date().toISOString().split("T")[0],
-      };
-      setDecks([deck, ...decks]);
-      setNewDeck({ name: "", description: "" });
-      setIsCreateModalOpen(false);
+      try {
+        const res = await fetch("http://localhost:3000/api/decks", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            userId: userId, // Replace with dynamic userId if needed
+            name: newDeck.name,
+            description: newDeck.description,
+          }),
+        });
+
+        if (!res.ok) throw new Error("Failed to create deck");
+
+        const data = await res.json();
+        const createdDeck = data.newDeck;
+
+        const transformedDeck: Deck = {
+          id: createdDeck._id,
+          name: createdDeck.name,
+          description: createdDeck.description,
+          flashcardCount: createdDeck.flashcards?.length || 0,
+          lastModified: new Date(createdDeck.updatedAt)
+            .toISOString()
+            .split("T")[0],
+          createdAt: new Date(createdDeck.createdAt)
+            .toISOString()
+            .split("T")[0],
+        };
+
+        setDecks([transformedDeck, ...decks]);
+        setNewDeck({ name: "", description: "" });
+        setIsCreateModalOpen(false);
+      } catch (error) {
+        console.error("Error creating deck:", error);
+      }
     }
   };
 
-  const handleEditDeck = () => {
-    if (selectedDeck && editDeck.name.trim()) {
-      setDecks(
-        decks.map((deck) =>
+  const handleEditDeck = async () => {
+    if (!selectedDeck || !editDeck.name.trim()) return;
+
+    try {
+      const res = await fetch(
+        `http://localhost:3000/api/decks/${selectedDeck.id}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            name: editDeck.name,
+            description: editDeck.description,
+          }),
+        }
+      );
+
+      if (!res.ok) {
+        throw new Error("Failed to update deck");
+      }
+
+      const updatedDeckData = await res.json();
+      const updatedDeck = updatedDeckData.updatedDeck;
+
+      setDecks((prevDecks) =>
+        prevDecks.map((deck) =>
           deck.id === selectedDeck.id
             ? {
                 ...deck,
-                name: editDeck.name,
-                description: editDeck.description,
-                lastModified: new Date().toISOString().split("T")[0],
+                name: updatedDeck.name,
+                description: updatedDeck.description,
+                lastModified: new Date(updatedDeck.updatedAt)
+                  .toISOString()
+                  .split("T")[0],
               }
             : deck
         )
       );
+
       setIsEditModalOpen(false);
       setSelectedDeck(null);
+    } catch (error) {
+      console.error("Error updating deck:", error);
     }
   };
 
-  const handleDeleteDeck = () => {
-    if (selectedDeck) {
+  const handleDeleteDeck = async () => {
+    if (!selectedDeck) return;
+
+    try {
+      const res = await fetch(
+        `http://localhost:3000/api/decks/${selectedDeck.id}`,
+        {
+          method: "DELETE",
+        }
+      );
+
+      if (!res.ok) {
+        throw new Error("Failed to delete deck");
+      }
+
       setDecks(decks.filter((deck) => deck.id !== selectedDeck.id));
       setIsDeleteDialogOpen(false);
       setSelectedDeck(null);
+    } catch (error) {
+      console.error("Error deleting deck:", error);
     }
   };
 
@@ -175,6 +209,40 @@ export default function DashboardPage() {
     });
   };
 
+  useEffect(() => {
+    if (status === "unauthenticated") {
+      router.push("/signin");
+    }
+  }, [status, router]);
+
+  useEffect(() => {
+    const fetchDecks = async () => {
+      try {
+        const res = await fetch(
+          `http://localhost:3000/api/decks?userId=${userId}`
+        );
+        const data = await res.json();
+        if (data.length > 0) {
+          const transformed = data.map((deck: any) => ({
+            id: deck._id,
+            name: deck.name,
+            description: deck.description,
+            flashcardCount: deck.flashcards?.length || 0,
+            lastModified: new Date(deck.updatedAt).toISOString().split("T")[0],
+            createdAt: new Date(deck.createdAt).toISOString().split("T")[0],
+          }));
+          setDecks(transformed);
+        }
+      } catch (error) {
+        console.error("Failed to fetch decks:", error);
+      }
+    };
+
+    if (status === "authenticated" && userId) {
+      fetchDecks();
+    }
+  }, [status, userId]);
+
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
@@ -187,7 +255,7 @@ export default function DashboardPage() {
         </Link>
         <nav className="ml-auto flex items-center gap-4 sm:gap-6">
           <Link
-            href="/ai-generator"
+            href="/generate"
             className="text-sm font-medium hover:underline underline-offset-4 transition-colors"
           >
             AI Generator
@@ -200,10 +268,11 @@ export default function DashboardPage() {
           </Link>
           <ThemeToggle />
           <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm">
-              Profile
-            </Button>
-            <Button variant="outline" size="sm">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => signOut({ callbackUrl: "/" })}
+            >
               Sign Out
             </Button>
           </div>
@@ -211,6 +280,18 @@ export default function DashboardPage() {
       </header>
 
       <main className="container mx-auto px-16 py-8">
+        <div className="mb-6">
+          <div className="flex items-center gap-3 mb-2">
+            <div>
+              <h1 className="text-2xl font-bold text-foreground">
+                Welcome back, {username}!
+              </h1>
+              <p className="text-sm text-muted-foreground">
+                Ready to continue your learning journey?
+              </p>
+            </div>
+          </div>
+        </div>
         {/* Page Header */}
         <div className="flex flex-col gap-4 mb-8">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -366,11 +447,20 @@ export default function DashboardPage() {
                     </div>
                   </div>
                   <div className="flex gap-2">
-                    <Button variant="outline" size="sm" className="flex-1">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="flex-1"
+                      onClick={() => router.push(`/deck/${deck.id}`)}
+                    >
                       <Eye className="mr-1 h-3 w-3" />
                       View
                     </Button>
-                    <Button size="sm" className="flex-1">
+                    <Button
+                      size="sm"
+                      className="flex-1"
+                      onClick={() => router.push(`/deck/${deck.id}/study`)}
+                    >
                       <BookOpen className="mr-1 h-3 w-3" />
                       Study
                     </Button>

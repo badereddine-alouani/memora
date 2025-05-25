@@ -24,8 +24,12 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { signOut, useSession } from "next-auth/react";
+import { useRouter } from "next/navigation";
 
 export default function MemoraLanding() {
+  const { data: session, status } = useSession();
+  const router = useRouter();
   const heroRef = useRef<HTMLElement>(null);
   const featuresRef = useRef<HTMLElement>(null);
   const aiSectionRef = useRef<HTMLElement>(null);
@@ -223,25 +227,44 @@ export default function MemoraLanding() {
             Contact
           </button>
           <ThemeToggle />
-          <div className="flex items-center gap-2">
-            <Link href="/signin">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="transition-all duration-300 hover:scale-105"
-              >
-                Sign In
-              </Button>
+          {status === "authenticated" && (
+            <Link
+              href="/dashboard"
+              className="text-sm font-medium hover:underline underline-offset-4 transition-colors"
+            >
+              Dashboard
             </Link>
-            <Link href="/signup">
-              <Button
-                size="sm"
-                className="bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 transition-all duration-300 hover:scale-105"
-              >
-                Sign Up
-              </Button>
-            </Link>
-          </div>
+          )}
+          {status === "unauthenticated" ? (
+            <div className="flex items-center gap-2">
+              <Link href="/signin">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="transition-all duration-300 hover:scale-105"
+                >
+                  Sign In
+                </Button>
+              </Link>
+              <Link href="/signup">
+                <Button
+                  size="sm"
+                  className="bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 transition-all duration-300 hover:scale-105"
+                >
+                  Sign Up
+                </Button>
+              </Link>
+            </div>
+          ) : (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="transition-all duration-300 hover:scale-105"
+              onClick={() => signOut({ callbackUrl: "/" })}
+            >
+              Sign Out
+            </Button>
+          )}
         </nav>
       </header>
 

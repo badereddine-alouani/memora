@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -47,21 +47,27 @@ import {
   X,
   Eye,
   EyeOff,
+  Loader2,
 } from "lucide-react";
 import Link from "next/link";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { signOut } from "next-auth/react";
 
 type Difficulty = "easy" | "medium" | "hard";
 
 interface CardType {
-  id: string;
-  question: string;
-  answer: string;
-  difficulty: Difficulty;
+  _id: string;
+  front: string;
+  back: string;
   deckId: string;
-  lastReviewed: string;
-  timesReviewed: number;
-  correctCount: number;
+  difficulty?: Difficulty;
+  studyStats: {
+    lastStudied: string | null;
+    studyCount: number;
+    correctCount?: number;
+  };
+  createdAt: string;
+  updatedAt: string;
 }
 
 interface Deck {
@@ -76,109 +82,105 @@ const DeckPage = () => {
   const deckId = params?.deckId as string;
   const router = useRouter();
 
-  // Mock deck data
-  const [deck] = useState<Deck>({
-    id: deckId,
-    name: "Spanish Vocabulary",
-    description: "Essential Spanish words and phrases for beginners",
-    flashcardCount: 45,
-  });
-
-  // Mock flashcards data
-  const [cards, setCards] = useState<CardType[]>([
-    {
-      id: "1",
-      question: "What is 'hello' in Spanish?",
-      answer: "Hola",
-      difficulty: "easy",
-      deckId: deckId,
-      lastReviewed: "2024-01-15",
-      timesReviewed: 5,
-      correctCount: 4,
-    },
-    {
-      id: "2",
-      question: "How do you say 'goodbye' in Spanish?",
-      answer: "Adiós",
-      difficulty: "easy",
-      deckId: deckId,
-      lastReviewed: "2024-01-14",
-      timesReviewed: 3,
-      correctCount: 3,
-    },
-    {
-      id: "3",
-      question: "What does 'por favor' mean?",
-      answer: "Please",
-      difficulty: "medium",
-      deckId: deckId,
-      lastReviewed: "2024-01-13",
-      timesReviewed: 4,
-      correctCount: 2,
-    },
-    {
-      id: "4",
-      question: "Translate 'I am learning Spanish'",
-      answer: "Estoy aprendiendo español",
-      difficulty: "hard",
-      deckId: deckId,
-      lastReviewed: "2024-01-12",
-      timesReviewed: 2,
-      correctCount: 1,
-    },
-    {
-      id: "5",
-      question: "What does 'gracias' mean?",
-      answer: "Thank you",
-      difficulty: "easy",
-      deckId: deckId,
-      lastReviewed: "2024-01-11",
-      timesReviewed: 6,
-      correctCount: 5,
-    },
-  ]);
-
+  const [deck, setDeck] = useState<Deck | null>(null);
+  const [cards, setCards] = useState<CardType[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [cardToDelete, setCardToDelete] = useState<string | null>(null);
   const [cardToEdit, setCardToEdit] = useState<CardType | null>(null);
   const [showAnswers, setShowAnswers] = useState<Record<string, boolean>>({});
+  const [isCreating, setIsCreating] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const [newCard, setNewCard] = useState({
-    question: "",
-    answer: "",
+    front: "",
+    back: "",
     difficulty: "medium" as Difficulty,
   });
 
   const [editCard, setEditCard] = useState({
-    question: "",
-    answer: "",
+    front: "",
+    back: "",
     difficulty: "medium" as Difficulty,
   });
+
+  // Fetch deck and flashcards data
+  useEffect(() => {
+    const fetchData = async () => {
+      if (!deckId) return;
+
+      try {
+        setLoading(true);
+        setError(null);
+
+        // Fetch deck info
+        const deckResponse = await fetch(`/api/decks/${deckId}`);
+        if (!deckResponse.ok) {
+          throw new Error("Failed to fetch deck");
+        }
+        const deckData = await deckResponse.json();
+        setDeck(deckData);
+
+        // Fetch flashcards
+        const cardsResponse = await fetch(`/api/decks/${deckId}/flashcards`);
+        if (!cardsResponse.ok) {
+          throw new Error("Failed to fetch flashcards");
+        }
+        const cardsData = await cardsResponse.json();
+        setCards(cardsData);
+      } catch (err) {
+        console.error("Error fetching data:", err);
+        setError(err instanceof Error ? err.message : "Failed to load data");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+  }, [deckId]);
 
   // Filter cards based on search term
   const filteredCards = cards.filter(
     (card) =>
-      card.question.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      card.answer.toLowerCase().includes(searchTerm.toLowerCase())
+      card.front.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      card.back.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const handleCreateCard = () => {
-    if (newCard.question.trim() && newCard.answer.trim()) {
-      const card: CardType = {
-        id: Date.now().toString(),
-        question: newCard.question,
-        answer: newCard.answer,
-        difficulty: newCard.difficulty,
-        deckId: deckId,
-        lastReviewed: new Date().toISOString().split("T")[0],
-        timesReviewed: 0,
-        correctCount: 0,
-      };
-      setCards([card, ...cards]);
-      setNewCard({ question: "", answer: "", difficulty: "medium" });
+  const handleCreateCard = async () => {
+    if (!newCard.front.trim() || !newCard.back.trim()) return;
+
+    try {
+      setIsCreating(true);
+      const response = await fetch(`/api/decks/${deckId}/flashcards`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          front: newCard.front,
+          back: newCard.back,
+          difficulty: newCard.difficulty,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to create flashcard");
+      }
+
+      const data = await response.json();
+      const createdCard = data.newFlashcard;
+      setCards([createdCard, ...cards]);
+      setNewCard({ front: "", back: "", difficulty: "medium" });
       setIsCreateModalOpen(false);
+    } catch (err) {
+      console.error("Error creating card:", err);
+      setError("Failed to create flashcard");
+    } finally {
+      setIsCreating(false);
     }
   };
 
@@ -186,43 +188,90 @@ const DeckPage = () => {
     setCardToDelete(cardId);
   };
 
-  const confirmDeleteCard = () => {
+  const confirmDeleteCard = async () => {
     if (!cardToDelete) return;
-    setCards(cards.filter((card) => card.id !== cardToDelete));
-    setCardToDelete(null);
+
+    try {
+      setIsDeleting(true);
+      const response = await fetch(`/api/flashcards/${cardToDelete}`, {
+        method: "DELETE",
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to delete flashcard");
+      }
+
+      setCards(cards.filter((card) => card._id !== cardToDelete));
+      setCardToDelete(null);
+    } catch (err) {
+      console.error("Error deleting card:", err);
+      setError("Failed to delete flashcard");
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   const openEditModal = (card: CardType) => {
     setCardToEdit(card);
     setEditCard({
-      question: card.question,
-      answer: card.answer,
-      difficulty: card.difficulty,
+      front: card.front,
+      back: card.back,
+      difficulty: card.difficulty || "medium",
     });
     setIsEditModalOpen(true);
   };
 
-  const handleUpdateCard = () => {
+  const handleUpdateCard = async () => {
     if (!cardToEdit) return;
 
-    setCards(
-      cards.map((card) =>
-        card.id === cardToEdit.id
-          ? {
-              ...card,
-              question: editCard.question,
-              answer: editCard.answer,
-              difficulty: editCard.difficulty,
-            }
-          : card
-      )
-    );
-    setIsEditModalOpen(false);
-    setCardToEdit(null);
+    try {
+      setIsUpdating(true);
+      const response = await fetch(`/api/flashcards/${cardToEdit._id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          front: editCard.front,
+          back: editCard.back,
+          difficulty: editCard.difficulty,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to update flashcard");
+      }
+
+      const data = await response.json();
+      const updatedCard = data.updatedFlashcard;
+      setCards(
+        cards.map((card) => (card._id === cardToEdit._id ? updatedCard : card))
+      );
+      setIsEditModalOpen(false);
+      setCardToEdit(null);
+    } catch (err) {
+      console.error("Error updating card:", err);
+      setError("Failed to update flashcard");
+    } finally {
+      setIsUpdating(false);
+    }
   };
 
-  const handleDeleteDeck = () => {
-    router.push("/dashboard");
+  const handleDeleteDeck = async () => {
+    try {
+      const response = await fetch(`/api/decks/${deckId}`, {
+        method: "DELETE",
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to delete deck");
+      }
+
+      router.push("/dashboard");
+    } catch (err) {
+      console.error("Error deleting deck:", err);
+      setError("Failed to delete deck");
+    }
   };
 
   const toggleAnswer = (cardId: string) => {
@@ -246,9 +295,124 @@ const DeckPage = () => {
   };
 
   const getAccuracyPercentage = (card: CardType) => {
-    if (card.timesReviewed === 0) return 0;
-    return Math.round((card.correctCount / card.timesReviewed) * 100);
+    console.log(card);
+    const timesReviewed = card.studyStats?.studyCount || 0;
+    const correctCount = card.studyStats?.correctCount || 0;
+    if (timesReviewed === 0) return 0;
+    return Math.round((correctCount / timesReviewed) * 100);
   };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-background">
+        <header className="px-4 lg:px-6 h-16 flex items-center border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50">
+          <Link href="/" className="flex items-center justify-center">
+            <Brain className="h-8 w-8 text-primary" />
+            <span className="ml-2 text-2xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
+              Memora
+            </span>
+          </Link>
+          <nav className="ml-auto flex items-center gap-4 sm:gap-6">
+            <Link
+              href="/generate"
+              className="text-sm font-medium hover:underline underline-offset-4 transition-colors"
+            >
+              AI Generator
+            </Link>
+            <Link
+              href="/dashboard"
+              className="text-sm font-medium hover:underline underline-offset-4 transition-colors"
+            >
+              Dashboard
+            </Link>
+            <ThemeToggle />
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => signOut({ callbackUrl: "/" })}
+              >
+                Sign Out
+              </Button>
+            </div>
+          </nav>
+        </header>
+        <div className="flex items-center justify-center min-h-[calc(100vh-4rem)]">
+          <div className="flex items-center gap-2">
+            <Loader2 className="h-8 w-8 animate-spin" />
+            <span className="text-lg">Loading deck...</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-background">
+        <header className="px-4 lg:px-6 h-16 flex items-center border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-50">
+          <Link href="/" className="flex items-center justify-center">
+            <Brain className="h-8 w-8 text-primary" />
+            <span className="ml-2 text-2xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
+              Memora
+            </span>
+          </Link>
+          <nav className="ml-auto flex items-center gap-4 sm:gap-6">
+            <Link
+              href="/generate"
+              className="text-sm font-medium hover:underline underline-offset-4 transition-colors"
+            >
+              AI Generator
+            </Link>
+            <Link
+              href="/dashboard"
+              className="text-sm font-medium hover:underline underline-offset-4 transition-colors"
+            >
+              Dashboard
+            </Link>
+            <ThemeToggle />
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm">
+                Sign Out
+              </Button>
+            </div>
+          </nav>
+        </header>
+        <div className="flex items-center justify-center min-h-[calc(100vh-4rem)]">
+          <div className="text-center">
+            <h2 className="text-2xl font-bold mb-2">Error Loading Deck</h2>
+            <p className="text-muted-foreground mb-4">{error}</p>
+            <div className="flex gap-2 justify-center">
+              <Button onClick={() => window.location.reload()}>
+                Try Again
+              </Button>
+              <Link href="/dashboard">
+                <Button variant="outline">Back to Dashboard</Button>
+              </Link>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!deck) {
+    return (
+      <div className="min-h-screen bg-background">
+        <div className="flex items-center justify-center min-h-screen">
+          <div className="text-center">
+            <h2 className="text-2xl font-bold mb-2">Deck Not Found</h2>
+            <p className="text-muted-foreground mb-4">
+              The requested deck could not be found.
+            </p>
+            <Link href="/dashboard">
+              <Button>Back to Dashboard</Button>
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background">
@@ -262,7 +426,7 @@ const DeckPage = () => {
         </Link>
         <nav className="ml-auto flex items-center gap-4 sm:gap-6">
           <Link
-            href="/ai-generator"
+            href="/generate"
             className="text-sm font-medium hover:underline underline-offset-4 transition-colors"
           >
             AI Generator
@@ -275,10 +439,11 @@ const DeckPage = () => {
           </Link>
           <ThemeToggle />
           <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm">
-              Profile
-            </Button>
-            <Button variant="outline" size="sm">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => signOut({ callbackUrl: "/" })}
+            >
               Sign Out
             </Button>
           </div>
@@ -286,6 +451,21 @@ const DeckPage = () => {
       </header>
 
       <main className="container mx-auto px-16 py-8">
+        {/* Error Display */}
+        {error && (
+          <div className="mb-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+            <p className="text-red-700 dark:text-red-300">{error}</p>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setError(null)}
+              className="mt-2 text-red-700 dark:text-red-300"
+            >
+              Dismiss
+            </Button>
+          </div>
+        )}
+
         {/* Page Header */}
         <div className="flex flex-col gap-4 mb-8">
           <div className="flex items-center gap-4">
@@ -310,7 +490,7 @@ const DeckPage = () => {
             </div>
 
             <div className="flex gap-2">
-              <Link href={`/study/${deck.id}`}>
+              <Link href={`/deck/${deckId}/study`}>
                 <Button
                   size="lg"
                   className="bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700"
@@ -339,24 +519,24 @@ const DeckPage = () => {
                   </DialogHeader>
                   <div className="grid gap-4 py-4">
                     <div className="grid gap-2">
-                      <Label htmlFor="question">Question</Label>
+                      <Label htmlFor="question">Question (Front)</Label>
                       <Textarea
                         id="question"
-                        placeholder="Enter the question..."
-                        value={newCard.question}
+                        placeholder="Enter the front of the card..."
+                        value={newCard.front}
                         onChange={(e) =>
-                          setNewCard({ ...newCard, question: e.target.value })
+                          setNewCard({ ...newCard, front: e.target.value })
                         }
                       />
                     </div>
                     <div className="grid gap-2">
-                      <Label htmlFor="answer">Answer</Label>
+                      <Label htmlFor="answer">Answer (Back)</Label>
                       <Textarea
                         id="answer"
-                        placeholder="Enter the answer..."
-                        value={newCard.answer}
+                        placeholder="Enter the back of the card..."
+                        value={newCard.back}
                         onChange={(e) =>
-                          setNewCard({ ...newCard, answer: e.target.value })
+                          setNewCard({ ...newCard, back: e.target.value })
                         }
                       />
                     </div>
@@ -386,15 +566,21 @@ const DeckPage = () => {
                     <Button
                       variant="outline"
                       onClick={() => setIsCreateModalOpen(false)}
+                      disabled={isCreating}
                     >
                       Cancel
                     </Button>
                     <Button
                       onClick={handleCreateCard}
                       disabled={
-                        !newCard.question.trim() || !newCard.answer.trim()
+                        !newCard.front.trim() ||
+                        !newCard.back.trim() ||
+                        isCreating
                       }
                     >
+                      {isCreating && (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      )}
                       Create Card
                     </Button>
                   </DialogFooter>
@@ -447,11 +633,18 @@ const DeckPage = () => {
         ) : (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             {filteredCards.map((card) => (
-              <Card key={card.id} className="hover:shadow-lg transition-shadow">
+              <Card
+                key={card._id}
+                className="hover:shadow-lg transition-shadow"
+              >
                 <CardHeader className="pb-3">
                   <div className="flex items-start justify-between">
-                    <Badge className={getDifficultyColor(card.difficulty)}>
-                      {card.difficulty}
+                    <Badge
+                      className={getDifficultyColor(
+                        card.difficulty || "medium"
+                      )}
+                    >
+                      {card.difficulty || "medium"}
                     </Badge>
                     <div className="flex gap-1">
                       <Button
@@ -466,7 +659,7 @@ const DeckPage = () => {
                         variant="ghost"
                         size="sm"
                         className="h-8 w-8 p-0 text-destructive hover:text-destructive"
-                        onClick={() => handleDeleteCard(card.id)}
+                        onClick={() => handleDeleteCard(card._id)}
                       >
                         <Trash2 className="h-4 w-4" />
                       </Button>
@@ -475,31 +668,31 @@ const DeckPage = () => {
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div>
-                    <h4 className="font-medium mb-2">Question:</h4>
+                    <h4 className="font-medium mb-2">Front:</h4>
                     <p className="text-sm text-muted-foreground">
-                      {card.question}
+                      {card.front}
                     </p>
                   </div>
 
                   <div>
                     <div className="flex items-center justify-between mb-2">
-                      <h4 className="font-medium">Answer:</h4>
+                      <h4 className="font-medium">Back:</h4>
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => toggleAnswer(card.id)}
+                        onClick={() => toggleAnswer(card._id)}
                         className="h-6 w-6 p-0"
                       >
-                        {showAnswers[card.id] ? (
+                        {showAnswers[card._id] ? (
                           <EyeOff className="h-3 w-3" />
                         ) : (
                           <Eye className="h-3 w-3" />
                         )}
                       </Button>
                     </div>
-                    {showAnswers[card.id] ? (
+                    {showAnswers[card._id] ? (
                       <p className="text-sm text-muted-foreground">
-                        {card.answer}
+                        {card.back}
                       </p>
                     ) : (
                       <p className="text-sm text-muted-foreground italic">
@@ -509,7 +702,7 @@ const DeckPage = () => {
                   </div>
 
                   <div className="flex items-center justify-between text-xs text-muted-foreground pt-2 border-t">
-                    <span>Reviewed {card.timesReviewed} times</span>
+                    <span>Reviewed {card.studyStats.studyCount} times</span>
                     <span>{getAccuracyPercentage(card)}% accuracy</span>
                   </div>
                 </CardContent>
@@ -529,22 +722,22 @@ const DeckPage = () => {
             </DialogHeader>
             <div className="grid gap-4 py-4">
               <div className="grid gap-2">
-                <Label htmlFor="edit-question">Question</Label>
+                <Label htmlFor="edit-question">Question (Front)</Label>
                 <Textarea
                   id="edit-question"
-                  value={editCard.question}
+                  value={editCard.front}
                   onChange={(e) =>
-                    setEditCard({ ...editCard, question: e.target.value })
+                    setEditCard({ ...editCard, front: e.target.value })
                   }
                 />
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="edit-answer">Answer</Label>
+                <Label htmlFor="edit-answer">Answer (Back)</Label>
                 <Textarea
                   id="edit-answer"
-                  value={editCard.answer}
+                  value={editCard.back}
                   onChange={(e) =>
-                    setEditCard({ ...editCard, answer: e.target.value })
+                    setEditCard({ ...editCard, back: e.target.value })
                   }
                 />
               </div>
@@ -574,13 +767,19 @@ const DeckPage = () => {
               <Button
                 variant="outline"
                 onClick={() => setIsEditModalOpen(false)}
+                disabled={isUpdating}
               >
                 Cancel
               </Button>
               <Button
                 onClick={handleUpdateCard}
-                disabled={!editCard.question.trim() || !editCard.answer.trim()}
+                disabled={
+                  !editCard.front.trim() || !editCard.back.trim() || isUpdating
+                }
               >
+                {isUpdating && (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                )}
                 Save Changes
               </Button>
             </DialogFooter>
@@ -594,15 +793,24 @@ const DeckPage = () => {
         >
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+              <AlertDialogTitle>Are you sure?</AlertDialogTitle>
               <AlertDialogDescription>
                 This action cannot be undone. This will permanently delete the
                 card from your deck.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction onClick={confirmDeleteCard}>
+              <AlertDialogCancel disabled={isDeleting}>
+                Cancel
+              </AlertDialogCancel>
+              <AlertDialogAction
+                onClick={confirmDeleteCard}
+                disabled={isDeleting}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                {isDeleting && (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                )}
                 Delete Card
               </AlertDialogAction>
             </AlertDialogFooter>
@@ -626,10 +834,10 @@ const DeckPage = () => {
               </AlertDialogTrigger>
               <AlertDialogContent>
                 <AlertDialogHeader>
-                  <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+                  <AlertDialogTitle>Are you sure?</AlertDialogTitle>
                   <AlertDialogDescription>
-                    This action cannot be undone. This will permanently delete
-                    the deck "{deck.name}" and all associated cards.
+                    This will permanently delete the deck "{deck.name}" and all
+                    its flashcards. This action cannot be undone.
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>

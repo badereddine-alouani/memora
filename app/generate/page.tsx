@@ -2,7 +2,7 @@
 
 import type React from "react";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -33,6 +33,15 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { Dialog, DialogContent, DialogTrigger } from "@radix-ui/react-dialog";
+import {
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { signOut, useSession } from "next-auth/react";
+import { useRouter } from "next/navigation";
 
 interface Flashcard {
   id: string;
@@ -40,24 +49,98 @@ interface Flashcard {
   answer: string;
 }
 
+interface Deck {
+  _id: string;
+  name: string;
+  description?: string;
+}
+
 export default function AIGeneratorPage() {
+  const router = useRouter();
+  const { data: session, status } = useSession();
+  const userId = (session?.user as any)?.id;
+
   const [inputText, setInputText] = useState("");
   const [selectedDeck, setSelectedDeck] = useState("");
   const [newDeckName, setNewDeckName] = useState("");
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [newDeck, setNewDeck] = useState({ name: "", description: "" });
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedCards, setGeneratedCards] = useState<Flashcard[]>([]);
   const [dragActive, setDragActive] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [existingDecks, setExistingDecks] = useState<Deck[]>([]);
+  const [isLoadingDecks, setIsLoadingDecks] = useState(true);
+  const [maxFlashcards, setMaxFlashcards] = useState(8);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Mock existing decks
-  const existingDecks = [
-    { id: "1", name: "Biology Basics" },
-    { id: "2", name: "Spanish Vocabulary" },
-    { id: "3", name: "History Facts" },
-    { id: "4", name: "Computer Science" },
-    { id: "5", name: "Mathematics" },
-  ];
+  useEffect(() => {
+    if (status === "unauthenticated") {
+      router.push("/signin"); // or any route you want
+    }
+  }, [status, router]);
+
+  // Fetch existing decks on component mount
+  useEffect(() => {
+    if (status === "authenticated" && userId) {
+      fetchDecks();
+    }
+  }, [status, userId]);
+
+  const fetchDecks = async () => {
+    try {
+      setIsLoadingDecks(true);
+      const response = await fetch(`/api/decks?userId=${userId}`);
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const decks = await response.json();
+      setExistingDecks(decks);
+    } catch (error) {
+      console.error("Error fetching decks:", error);
+      // Optionally set an error state here
+    } finally {
+      setIsLoadingDecks(false);
+    }
+  };
+
+  const handleCreateDeck = async () => {
+    if (newDeck.name.trim()) {
+      try {
+        const res = await fetch("/api/decks", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            userId: userId,
+            name: newDeck.name,
+            description: newDeck.description,
+          }),
+        });
+
+        if (!res.ok) throw new Error("Failed to create deck");
+
+        const data = await res.json();
+        const createdDeck = data.newDeck;
+
+        // Add the new deck to the existing decks list
+        setExistingDecks((prev) => [...prev, createdDeck]);
+
+        // Optionally select the newly created deck
+        setSelectedDeck(createdDeck._id);
+
+        setNewDeck({ name: "", description: "" });
+        setIsCreateModalOpen(false);
+      } catch (error) {
+        console.error("Error creating deck:", error);
+        // Optionally show error message to user
+      }
+    }
+  };
 
   const handleFileUpload = (files: FileList | null) => {
     if (files && files[0]) {
@@ -96,24 +179,41 @@ export default function AIGeneratorPage() {
 
     setIsGenerating(true);
 
-    // Simulate AI generation with a delay
-    await new Promise((resolve) => setTimeout(resolve, 3000));
+    try {
+      const response = await fetch("/api/generate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          text: inputText,
+          maxFlashcards: maxFlashcards,
+        }),
+      });
 
-    // Mock generated flashcards based on input length
-    const numberOfCards = Math.min(Math.floor(inputText.length / 200) + 2, 8);
-    const mockCards: Flashcard[] = Array.from(
-      { length: numberOfCards },
-      (_, i) => ({
-        id: `card-${i + 1}`,
-        question: `What is the key concept #${i + 1} from the provided text?`,
-        answer: `This is the AI-generated answer for concept #${
-          i + 1
-        } based on the analysis of your input text. The AI has identified this as an important point to remember.`,
-      })
-    );
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
 
-    setGeneratedCards(mockCards);
-    setIsGenerating(false);
+      const flashcardsData = await response.json();
+
+      // Transform the API response to match your Flashcard type
+      const transformedCards: Flashcard[] = flashcardsData.map(
+        (card: any, index: number) => ({
+          id: `card-${index + 1}`,
+          question: card.front,
+          answer: card.back,
+        })
+      );
+
+      setGeneratedCards(transformedCards);
+    } catch (error) {
+      console.error("Failed to generate flashcards:", error);
+      // Optionally set an error state or show a toast notification
+      // setError('Failed to generate flashcards. Please try again.');
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   const editCard = (
@@ -139,26 +239,58 @@ export default function AIGeneratorPage() {
     setGeneratedCards((cards) => [...cards, newCard]);
   };
 
-  const saveToDeck = () => {
-    // Handle saving cards to selected deck
-    console.log(
-      "Saving cards to deck:",
-      selectedDeck || newDeckName,
-      generatedCards
-    );
-    setShowSuccess(true);
-    setTimeout(() => {
-      setShowSuccess(false);
-      // Reset form
-      setInputText("");
-      setGeneratedCards([]);
-      setSelectedDeck("");
-      setNewDeckName("");
-    }, 2000);
+  const saveToDeck = async () => {
+    if (!selectedDeck || generatedCards.length === 0) return;
+
+    setIsSaving(true);
+
+    try {
+      // Transform flashcards to match API format
+      const flashcardsForAPI = generatedCards.map((card) => ({
+        front: card.question,
+        back: card.answer,
+      }));
+
+      const response = await fetch(
+        `/api/decks/${selectedDeck}/flashcards/all`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(flashcardsForAPI),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const result = await response.json();
+      console.log("Flashcards saved successfully:", result);
+
+      // Show success message after successful save
+      setShowSuccess(true);
+
+      // Hide success message and reset form after delay
+      setTimeout(() => {
+        setShowSuccess(false);
+        // Reset form
+        setInputText("");
+        setGeneratedCards([]);
+        setSelectedDeck("");
+        setNewDeckName("");
+      }, 3000);
+    } catch (error) {
+      console.error("Error saving flashcards:", error);
+      // Optionally show error message to user
+      // You might want to add an error state here
+    } finally {
+      setIsSaving(false);
+    }
   };
 
-  const canSave =
-    generatedCards.length > 0 && (selectedDeck || newDeckName.trim());
+  const canSave = generatedCards.length > 0 && selectedDeck && !isSaving;
 
   return (
     <div className="min-h-screen flex flex-col bg-gradient-to-br from-background via-indigo-50/30 to-purple-50/30 dark:from-background dark:via-indigo-950/10 dark:to-purple-950/10">
@@ -171,27 +303,27 @@ export default function AIGeneratorPage() {
           </span>
         </Link>
         <div className="ml-auto flex items-center gap-4">
-          <ThemeToggle />
           <Link href="/">
             <Button variant="ghost" size="sm">
               <ArrowLeft className="h-4 w-4 mr-2" />
               Back to Home
             </Button>
           </Link>
+          <Link
+            href="/dashboard"
+            className="text-sm font-medium hover:underline underline-offset-4 transition-colors"
+          >
+            Dashboard
+          </Link>
+          <ThemeToggle />
           <div className="flex items-center gap-2">
-            <Link href="/login">
-              <Button variant="ghost" size="sm">
-                Sign In
-              </Button>
-            </Link>
-            <Link href="/signup">
-              <Button
-                size="sm"
-                className="bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700"
-              >
-                Sign Up
-              </Button>
-            </Link>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => signOut({ callbackUrl: "/" })}
+            >
+              Sign Out
+            </Button>
           </div>
         </div>
       </header>
@@ -243,7 +375,7 @@ export default function AIGeneratorPage() {
                       placeholder="Paste your study material here... (lecture notes, textbook content, articles, research papers, etc.)"
                       value={inputText}
                       onChange={(e) => setInputText(e.target.value)}
-                      className="min-h-[300px] resize-none"
+                      className="min-h-[300px] resize-none break-words whitespace-pre-wrap"
                     />
                     <div className="flex justify-between text-xs text-muted-foreground">
                       <span>{inputText.length}/5000 characters</span>
@@ -251,6 +383,50 @@ export default function AIGeneratorPage() {
                         Recommended: 500+ characters for better results
                       </span>
                     </div>
+                  </div>
+
+                  {/* Max Flashcards Input */}
+                  <div className="space-y-2">
+                    <Label htmlFor="max-cards">
+                      Maximum Flashcards to Generate
+                    </Label>
+                    <div className="flex items-center space-x-4">
+                      <Input
+                        id="max-cards"
+                        type="number"
+                        min="1"
+                        max="20"
+                        value={maxFlashcards}
+                        onChange={(e) =>
+                          setMaxFlashcards(
+                            Math.max(
+                              1,
+                              Math.min(20, parseInt(e.target.value) || 1)
+                            )
+                          )
+                        }
+                        className="w-24"
+                      />
+                      <div className="flex-1">
+                        <input
+                          type="range"
+                          min="1"
+                          max="20"
+                          value={maxFlashcards}
+                          onChange={(e) =>
+                            setMaxFlashcards(parseInt(e.target.value))
+                          }
+                          className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700 slider"
+                        />
+                      </div>
+                      <span className="text-sm text-muted-foreground min-w-[60px]">
+                        {maxFlashcards} card{maxFlashcards !== 1 ? "s" : ""}
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Choose between 1-20 flashcards. More cards work better
+                      with longer content.
+                    </p>
                   </div>
 
                   {/* File Upload */}
@@ -301,7 +477,8 @@ export default function AIGeneratorPage() {
                     {isGenerating ? (
                       <>
                         <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" />
-                        Analyzing and Generating...
+                        Generating {maxFlashcards} flashcard
+                        {maxFlashcards !== 1 ? "s" : ""}...
                       </>
                     ) : (
                       <>
@@ -402,16 +579,30 @@ export default function AIGeneratorPage() {
                     <Select
                       value={selectedDeck}
                       onValueChange={setSelectedDeck}
+                      disabled={isLoadingDecks}
                     >
                       <SelectTrigger>
-                        <SelectValue placeholder="Choose a deck..." />
+                        <SelectValue
+                          placeholder={
+                            isLoadingDecks
+                              ? "Loading decks..."
+                              : existingDecks.length === 0
+                              ? "No decks available"
+                              : "Choose a deck..."
+                          }
+                        />
                       </SelectTrigger>
                       <SelectContent>
                         {existingDecks.map((deck) => (
-                          <SelectItem key={deck.id} value={deck.id}>
+                          <SelectItem key={deck._id} value={deck._id}>
                             {deck.name}
                           </SelectItem>
                         ))}
+                        {existingDecks.length === 0 && !isLoadingDecks && (
+                          <SelectItem value=" " disabled>
+                            No decks found
+                          </SelectItem>
+                        )}
                       </SelectContent>
                     </Select>
                   </div>
@@ -428,15 +619,67 @@ export default function AIGeneratorPage() {
                   </div>
 
                   {/* New Deck Creation */}
-                  <div className="space-y-2">
-                    <Label htmlFor="new-deck">Create New Deck</Label>
-                    <Input
-                      id="new-deck"
-                      placeholder="Enter deck name..."
-                      value={newDeckName}
-                      onChange={(e) => setNewDeckName(e.target.value)}
-                    />
-                  </div>
+                  <Dialog
+                    open={isCreateModalOpen}
+                    onOpenChange={setIsCreateModalOpen}
+                  >
+                    <DialogTrigger asChild>
+                      <Button variant="outline" size="lg" className="w-full">
+                        <Plus className="mr-2 h-4 w-4" />
+                        Create New Deck
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="sm:max-w-[425px]">
+                      <DialogHeader>
+                        <DialogTitle>Create New Deck</DialogTitle>
+                        <DialogDescription>
+                          Create a new flashcard deck to organize your study
+                          materials.
+                        </DialogDescription>
+                      </DialogHeader>
+                      <div className="grid gap-4 py-4">
+                        <div className="grid gap-2">
+                          <Label htmlFor="name">Deck Name</Label>
+                          <Input
+                            id="name"
+                            placeholder="Enter deck name..."
+                            value={newDeck.name}
+                            onChange={(e) =>
+                              setNewDeck({ ...newDeck, name: e.target.value })
+                            }
+                          />
+                        </div>
+                        <div className="grid gap-2">
+                          <Label htmlFor="description">Description</Label>
+                          <Textarea
+                            id="description"
+                            placeholder="Enter deck description..."
+                            value={newDeck.description}
+                            onChange={(e) =>
+                              setNewDeck({
+                                ...newDeck,
+                                description: e.target.value,
+                              })
+                            }
+                          />
+                        </div>
+                      </div>
+                      <DialogFooter>
+                        <Button
+                          variant="outline"
+                          onClick={() => setIsCreateModalOpen(false)}
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          onClick={handleCreateDeck}
+                          disabled={!newDeck.name.trim()}
+                        >
+                          Create Deck
+                        </Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
 
                   {/* Save Button */}
                   <Button
@@ -444,10 +687,10 @@ export default function AIGeneratorPage() {
                     disabled={!canSave}
                     className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700"
                   >
-                    {showSuccess ? (
+                    {isSaving ? (
                       <>
                         <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" />
-                        Saving...
+                        Saving to Deck...
                       </>
                     ) : (
                       <>
@@ -486,8 +729,18 @@ export default function AIGeneratorPage() {
         </div>
       </main>
 
+      {/* Loading Message */}
+      {isSaving && (
+        <div className="fixed bottom-4 right-4 bg-blue-500 text-white px-6 py-3 rounded-lg shadow-lg animate-in slide-in-from-bottom-2">
+          <div className="flex items-center gap-2">
+            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+            Saving flashcards...
+          </div>
+        </div>
+      )}
+
       {/* Success Message */}
-      {showSuccess && (
+      {showSuccess && !isSaving && (
         <div className="fixed bottom-4 right-4 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg animate-in slide-in-from-bottom-2">
           <div className="flex items-center gap-2">
             <div className="w-4 h-4 bg-white rounded-full flex items-center justify-center">

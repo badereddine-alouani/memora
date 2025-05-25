@@ -57,7 +57,10 @@ export async function PATCH(
       );
     }
 
-    return NextResponse.json(updatedFlashcard, { status: 200 });
+    return NextResponse.json(
+      { message: "Flashcard updated successfully", updatedFlashcard },
+      { status: 200 }
+    );
   } catch (error) {
     console.error("Update Flashcard Error:", error);
     return NextResponse.json({ message: "Server error" }, { status: 500 });

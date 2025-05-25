@@ -31,17 +31,14 @@ const flashcardSchema = new mongoose.Schema(
         type: Number,
         default: 0,
       },
+      correctCount: {
+        type: Number,
+        default: 0,
+      },
     },
   },
   { timestamps: true }
 );
-
-flashcardSchema.pre("save", function (next) {
-  if (this.studyStats.lastStudied) {
-    this.studyStats.studyCount += 1;
-  }
-  next();
-});
 
 const Flashcard =
   mongoose.models.Flashcard || mongoose.model("Flashcard", flashcardSchema);
